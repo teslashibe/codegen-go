@@ -238,6 +238,46 @@ func RunJSON(ctx context.Context, a Agent, prompt, workDir string, out any, opts
 
 ---
 
+## MCP support
+
+This package ships an [MCP](https://modelcontextprotocol.io/) tool surface in
+`./mcp` for use with [`teslashibe/mcptool`](https://github.com/teslashibe/mcptool)-compatible
+hosts (e.g. [`teslashibe/agent-setup`](https://github.com/teslashibe/agent-setup)).
+Two tools cover the full `Agent` surface:
+
+- `codegen_run` — execute the configured coding-agent CLI (Claude Code or any
+  generic CLI) with a prompt against a working directory; returns the
+  captured combined stdout/stderr, exit code, duration, and a truncation flag.
+- `codegen_run_json` — same as `codegen_run` but uses `RunJSON` to decode the
+  first well-formed JSON object/array from the agent's output, so you can use
+  the agent as a structured reasoner (verifier, reviewer, triager).
+
+```go
+import (
+    "github.com/teslashibe/mcptool"
+    codegen "github.com/teslashibe/codegen-go"
+    cgmcp "github.com/teslashibe/codegen-go/mcp"
+)
+
+agent, _ := codegen.NewAgent(codegen.Config{Type: "claude-code"})
+provider := cgmcp.Provider{}
+for _, tool := range provider.Tools() {
+    // register tool with your MCP server, passing agent as the
+    // opaque client argument when invoking
+}
+```
+
+A coverage test in `mcp/mcp_test.go` fails if a new exported method is added
+to `codegen.Agent` without either being wrapped by an MCP tool or being added
+to `mcp.Excluded` with a reason — keeping the MCP surface in lockstep with
+the package API is enforced by CI rather than convention.
+
+`codegen_run` is the most powerful tool in any MCP inventory: it executes a
+CLI inside the host process with full filesystem access. Gate it behind
+explicit user consent, run untrusted prompts in a sandbox (container, VM, or
+ephemeral git worktree), and use `timeout_seconds` / `max_output_bytes` to
+keep individual runs bounded.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
