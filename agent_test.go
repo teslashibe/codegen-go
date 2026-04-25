@@ -55,36 +55,99 @@ func TestBuildClaudeArgs(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		model string
-		want  []string
+		name      string
+		rc        runConfig
+		streaming bool
+		want      []string
 	}{
 		{
-			name:  "no model",
-			model: "",
-			want:  []string{"-p", "--output-format", "text", "--dangerously-skip-permissions"},
+			name: "no model, default text format",
+			rc:   runConfig{},
+			want: []string{"-p", "--output-format", "text", "--dangerously-skip-permissions"},
 		},
 		{
-			name:  "whitespace model treated as empty",
-			model: "   ",
-			want:  []string{"-p", "--output-format", "text", "--dangerously-skip-permissions"},
+			name: "whitespace model treated as empty",
+			rc:   runConfig{model: "   "},
+			want: []string{"-p", "--output-format", "text", "--dangerously-skip-permissions"},
 		},
 		{
-			name:  "with model",
-			model: "opus",
-			want:  []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "--model", "opus"},
+			name: "with model",
+			rc:   runConfig{model: "opus"},
+			want: []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "--model", "opus"},
 		},
 		{
-			name:  "trims model whitespace",
-			model: "  sonnet  ",
-			want:  []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "--model", "sonnet"},
+			name: "trims model whitespace",
+			rc:   runConfig{model: "  sonnet  "},
+			want: []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "--model", "sonnet"},
+		},
+		{
+			name: "explicit json output format",
+			rc:   runConfig{outputFormat: "json"},
+			want: []string{"-p", "--output-format", "json", "--dangerously-skip-permissions"},
+		},
+		{
+			name:      "streaming forces stream-json + verbose, ignores outputFormat",
+			rc:        runConfig{outputFormat: "text"},
+			streaming: true,
+			want:      []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"},
+		},
+		{
+			name: "appends system prompt",
+			rc:   runConfig{appendSystemPrompt: "be helpful"},
+			want: []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "--append-system-prompt", "be helpful"},
+		},
+		{
+			name: "trims and ignores blank system prompt",
+			rc:   runConfig{appendSystemPrompt: "   "},
+			want: []string{"-p", "--output-format", "text", "--dangerously-skip-permissions"},
+		},
+		{
+			name: "mcp config path",
+			rc:   runConfig{mcpConfigPath: "/etc/polybot/mcp.json"},
+			want: []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "--mcp-config", "/etc/polybot/mcp.json"},
+		},
+		{
+			name: "allowed and disallowed tools comma-joined",
+			rc: runConfig{
+				allowedTools:    []string{"Read", "Bash(git:*)", " mcp__polybot__trader_place_order "},
+				disallowedTools: []string{"WebFetch"},
+			},
+			want: []string{
+				"-p", "--output-format", "text", "--dangerously-skip-permissions",
+				"--allowedTools", "Read,Bash(git:*),mcp__polybot__trader_place_order",
+				"--disallowedTools", "WebFetch",
+			},
+		},
+		{
+			name: "empty tool entries dropped",
+			rc:   runConfig{allowedTools: []string{"", "  ", "Read"}},
+			want: []string{"-p", "--output-format", "text", "--dangerously-skip-permissions", "--allowedTools", "Read"},
+		},
+		{
+			name: "all flags together",
+			rc: runConfig{
+				model:              "claude-opus-4",
+				appendSystemPrompt: "you are polybot",
+				mcpConfigPath:      "/tmp/mcp.json",
+				allowedTools:       []string{"Read", "mcp__polybot__*"},
+				disallowedTools:    []string{"Bash"},
+			},
+			streaming: true,
+			want: []string{
+				"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
+				"--model", "claude-opus-4",
+				"--append-system-prompt", "you are polybot",
+				"--mcp-config", "/tmp/mcp.json",
+				"--allowedTools", "Read,mcp__polybot__*",
+				"--disallowedTools", "Bash",
+			},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildClaudeArgs(tc.model)
+			got := buildClaudeArgs(tc.rc, tc.streaming)
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("buildClaudeArgs(%q)\n  got:  %#v\n  want: %#v", tc.model, got, tc.want)
+				t.Fatalf("buildClaudeArgs(%+v, streaming=%v)\n  got:  %#v\n  want: %#v", tc.rc, tc.streaming, got, tc.want)
 			}
 		})
 	}
@@ -258,6 +321,70 @@ func TestResolveRunConfig_Defaults(t *testing.T) {
 	if rc.maxOutputBytes != 99 {
 		t.Fatalf("maxOutputBytes = %d, want 99", rc.maxOutputBytes)
 	}
+}
+
+func TestResolveRunConfig_StreamingFields(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		AppendSystemPrompt: "from-config",
+		MCPConfigPath:      "/etc/cfg.json",
+		AllowedTools:       []string{"Read"},
+		DisallowedTools:    []string{"Bash"},
+		OutputFormat:       "json",
+	}
+
+	t.Run("config defaults flow through", func(t *testing.T) {
+		rc := resolveRunConfig(cfg, nil)
+		if rc.appendSystemPrompt != "from-config" {
+			t.Errorf("appendSystemPrompt = %q", rc.appendSystemPrompt)
+		}
+		if rc.mcpConfigPath != "/etc/cfg.json" {
+			t.Errorf("mcpConfigPath = %q", rc.mcpConfigPath)
+		}
+		if !reflect.DeepEqual(rc.allowedTools, []string{"Read"}) {
+			t.Errorf("allowedTools = %#v", rc.allowedTools)
+		}
+		if !reflect.DeepEqual(rc.disallowedTools, []string{"Bash"}) {
+			t.Errorf("disallowedTools = %#v", rc.disallowedTools)
+		}
+		if rc.outputFormat != "json" {
+			t.Errorf("outputFormat = %q", rc.outputFormat)
+		}
+	})
+
+	t.Run("options override config", func(t *testing.T) {
+		rc := resolveRunConfig(cfg, []RunOption{
+			WithAppendSystemPrompt("override-sp"),
+			WithMCPConfig("/tmp/override.json"),
+			WithAllowedTools("WebFetch", "WebSearch"),
+			WithDisallowedTools(),
+			WithOutputFormat("stream-json"),
+		})
+		if rc.appendSystemPrompt != "override-sp" {
+			t.Errorf("appendSystemPrompt = %q", rc.appendSystemPrompt)
+		}
+		if rc.mcpConfigPath != "/tmp/override.json" {
+			t.Errorf("mcpConfigPath = %q", rc.mcpConfigPath)
+		}
+		if !reflect.DeepEqual(rc.allowedTools, []string{"WebFetch", "WebSearch"}) {
+			t.Errorf("allowedTools = %#v", rc.allowedTools)
+		}
+		if len(rc.disallowedTools) != 0 {
+			t.Errorf("disallowedTools = %#v, want empty after WithDisallowedTools()", rc.disallowedTools)
+		}
+		if rc.outputFormat != "stream-json" {
+			t.Errorf("outputFormat = %q", rc.outputFormat)
+		}
+	})
+
+	t.Run("config slices are not aliased", func(t *testing.T) {
+		rc := resolveRunConfig(cfg, nil)
+		rc.allowedTools[0] = "Mutated"
+		if cfg.AllowedTools[0] != "Read" {
+			t.Errorf("Config.AllowedTools mutated: %#v", cfg.AllowedTools)
+		}
+	})
 }
 
 func TestCappedBuffer_Uncapped(t *testing.T) {

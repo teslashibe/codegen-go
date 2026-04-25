@@ -1,6 +1,6 @@
 module github.com/teslashibe/codegen-go
 
-go 1.25
+go 1.25.5
 
 require github.com/teslashibe/mcptool v0.1.0
 

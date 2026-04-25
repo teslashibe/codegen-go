@@ -39,6 +39,29 @@ type Config struct {
 	// Args are extra arguments prepended to the GenericCLI argv (ignored by
 	// claude-code).
 	Args []string
+
+	// AppendSystemPrompt is appended to claude-code's built-in system prompt
+	// via --append-system-prompt. Useful for injecting brand persona, tool
+	// usage instructions, or domain rules without replacing the default
+	// behaviour. Ignored by the generic CLI.
+	AppendSystemPrompt string
+	// MCPConfigPath points at a Claude Code MCP config file (JSON) loaded
+	// via --mcp-config. Lets callers expose custom MCP servers (HTTP, SSE,
+	// stdio) to the agent. Ignored by the generic CLI.
+	MCPConfigPath string
+	// AllowedTools is a list of tool patterns passed to --allowedTools (e.g.
+	// "Read", "Bash(git:*)", "mcp__polybot__trader_place_order"). An empty
+	// slice omits the flag and lets Claude Code apply its defaults. Ignored
+	// by the generic CLI.
+	AllowedTools []string
+	// DisallowedTools is a list of tool patterns passed to --disallowedTools.
+	// Used to block specific tools while inheriting defaults. Ignored by the
+	// generic CLI.
+	DisallowedTools []string
+	// OutputFormat overrides claude-code's --output-format. Empty defaults to
+	// "text". Stream() forces "stream-json" regardless of this value. Ignored
+	// by the generic CLI.
+	OutputFormat string
 }
 
 // Sensible defaults applied when Config / RunOption leave a field unset.
@@ -51,9 +74,14 @@ const (
 type RunOption func(*runConfig)
 
 type runConfig struct {
-	model          string
-	timeout        time.Duration
-	maxOutputBytes int
+	model              string
+	timeout            time.Duration
+	maxOutputBytes     int
+	appendSystemPrompt string
+	mcpConfigPath      string
+	allowedTools       []string
+	disallowedTools    []string
+	outputFormat       string
 }
 
 // WithModel overrides the model passed to the underlying CLI for this Run.
@@ -74,6 +102,43 @@ func WithMaxOutputBytes(n int) RunOption {
 	return func(c *runConfig) { c.maxOutputBytes = n }
 }
 
+// WithAppendSystemPrompt overrides Config.AppendSystemPrompt for this Run.
+// Pass an empty string to clear the value and fall back to claude-code's
+// defaults. Ignored by agents that do not support a system prompt flag.
+func WithAppendSystemPrompt(s string) RunOption {
+	return func(c *runConfig) { c.appendSystemPrompt = s }
+}
+
+// WithMCPConfig overrides Config.MCPConfigPath for this Run. Pass an empty
+// string to disable MCP loading. Ignored by agents that do not understand
+// MCP configuration.
+func WithMCPConfig(path string) RunOption {
+	return func(c *runConfig) { c.mcpConfigPath = path }
+}
+
+// WithAllowedTools overrides Config.AllowedTools for this Run. Passing zero
+// arguments clears the flag (claude-code falls back to its defaults).
+func WithAllowedTools(tools ...string) RunOption {
+	return func(c *runConfig) {
+		c.allowedTools = append([]string(nil), tools...)
+	}
+}
+
+// WithDisallowedTools overrides Config.DisallowedTools for this Run. Passing
+// zero arguments clears the flag.
+func WithDisallowedTools(tools ...string) RunOption {
+	return func(c *runConfig) {
+		c.disallowedTools = append([]string(nil), tools...)
+	}
+}
+
+// WithOutputFormat overrides Config.OutputFormat for this Run. Stream()
+// always forces "stream-json" so this option is mainly useful for choosing
+// "json" vs the default "text" in non-streaming Run calls.
+func WithOutputFormat(format string) RunOption {
+	return func(c *runConfig) { c.outputFormat = format }
+}
+
 // NewAgent constructs an Agent from the given Config.
 func NewAgent(cfg Config) (Agent, error) {
 	switch strings.TrimSpace(cfg.Type) {
@@ -90,9 +155,14 @@ func NewAgent(cfg Config) (Agent, error) {
 // runConfig used by runCLI. RunOption values take precedence over Config.
 func resolveRunConfig(cfg Config, opts []RunOption) runConfig {
 	rc := runConfig{
-		model:          cfg.Model,
-		timeout:        cfg.Timeout,
-		maxOutputBytes: cfg.MaxOutputBytes,
+		model:              cfg.Model,
+		timeout:            cfg.Timeout,
+		maxOutputBytes:     cfg.MaxOutputBytes,
+		appendSystemPrompt: cfg.AppendSystemPrompt,
+		mcpConfigPath:      cfg.MCPConfigPath,
+		allowedTools:       append([]string(nil), cfg.AllowedTools...),
+		disallowedTools:    append([]string(nil), cfg.DisallowedTools...),
+		outputFormat:       cfg.OutputFormat,
 	}
 	if rc.timeout == 0 {
 		rc.timeout = DefaultTimeout
