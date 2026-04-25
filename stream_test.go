@@ -47,7 +47,7 @@ func fakeClaude(t *testing.T, stdoutLines []string, stderrText string, exitCode 
 }
 
 // shellQuote wraps s in single quotes for /bin/sh, escaping any embedded
-// single quotes via the standard '\'' dance.
+// single quotes via the standard '\” dance.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
