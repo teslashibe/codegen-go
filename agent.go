@@ -77,6 +77,17 @@ type Config struct {
 	// is read-only). Empty lets the preset pick its default. Ignored by presets
 	// that don't model approval modes (claude-code, codex, generic).
 	ApprovalMode string
+
+	// Variant selects provider-specific reasoning effort for presets that
+	// support it. OpenCode: "high" | "max" | "minimal". Empty omits the flag.
+	// Ignored by presets that don't model a variant.
+	Variant string
+
+	// SkipPermissions, when true, lets presets that support an auto-approve
+	// flag run without permission prompts (OpenCode:
+	// --dangerously-skip-permissions). Defaults differ per preset; see each
+	// preset's docs. Ignored by presets that don't model it.
+	SkipPermissions bool
 }
 
 // Sensible defaults applied when Config / RunOption leave a field unset.
@@ -99,6 +110,8 @@ type runConfig struct {
 	outputFormat       string
 	sandbox            string
 	approvalMode       string
+	variant            string
+	skipPermissions    bool
 	// unsetEnv lists environment variable names to strip from the
 	// child process. When non-empty cmd.Env is built from os.Environ()
 	// minus these keys; an empty list (the default) leaves cmd.Env
@@ -176,6 +189,20 @@ func WithApprovalMode(mode string) RunOption {
 	return func(c *runConfig) { c.approvalMode = mode }
 }
 
+// WithVariant overrides Config.Variant for this Run. Presets that model a
+// reasoning-effort variant (OpenCode) apply it; others ignore it. Pass an empty
+// string to omit the flag. OpenCode accepts "high" | "max" | "minimal".
+func WithVariant(variant string) RunOption {
+	return func(c *runConfig) { c.variant = variant }
+}
+
+// WithSkipPermissions overrides Config.SkipPermissions for this Run. Presets
+// that support an auto-approve flag (OpenCode:
+// --dangerously-skip-permissions) apply it; others ignore it.
+func WithSkipPermissions(skip bool) RunOption {
+	return func(c *runConfig) { c.skipPermissions = skip }
+}
+
 // WithUnsetEnv strips the named environment variables from the child
 // process before exec. By default the child inherits the full parent
 // environment (cmd.Env nil); supplying any keys here switches the
@@ -250,6 +277,8 @@ func NewAgent(cfg Config) (Agent, error) {
 		return NewCodex(cfg), nil
 	case "gemini":
 		return NewGemini(cfg), nil
+	case "opencode":
+		return NewOpenCode(cfg), nil
 	default:
 		return nil, fmt.Errorf("codegen: unknown agent type %q", cfg.Type)
 	}
@@ -269,6 +298,8 @@ func resolveRunConfig(cfg Config, opts []RunOption) runConfig {
 		outputFormat:       cfg.OutputFormat,
 		sandbox:            cfg.Sandbox,
 		approvalMode:       cfg.ApprovalMode,
+		variant:            cfg.Variant,
+		skipPermissions:    cfg.SkipPermissions,
 	}
 	if rc.timeout == 0 {
 		rc.timeout = DefaultTimeout
