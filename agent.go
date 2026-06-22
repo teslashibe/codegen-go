@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -70,6 +71,12 @@ type Config struct {
 	// Empty string lets the preset apply its own default. Ignored by presets
 	// that don't model a sandbox (claude-code, generic).
 	Sandbox string
+
+	// ApprovalMode selects the autonomy/permission policy for presets that
+	// support one. Gemini: "default" | "auto_edit" | "yolo" | "plan" ("plan"
+	// is read-only). Empty lets the preset pick its default. Ignored by presets
+	// that don't model approval modes (claude-code, codex, generic).
+	ApprovalMode string
 }
 
 // Sensible defaults applied when Config / RunOption leave a field unset.
@@ -91,6 +98,7 @@ type runConfig struct {
 	disallowedTools    []string
 	outputFormat       string
 	sandbox            string
+	approvalMode       string
 	// unsetEnv lists environment variable names to strip from the
 	// child process. When non-empty cmd.Env is built from os.Environ()
 	// minus these keys; an empty list (the default) leaves cmd.Env
@@ -158,6 +166,14 @@ func WithOutputFormat(format string) RunOption {
 // string to fall back to the preset's own default.
 func WithSandbox(mode string) RunOption {
 	return func(c *runConfig) { c.sandbox = mode }
+}
+
+// WithApprovalMode overrides Config.ApprovalMode for this Run. Presets that
+// model an approval/autonomy policy (Gemini) apply it; others ignore it. Pass
+// an empty string to fall back to the preset's own default. Gemini accepts
+// "default" | "auto_edit" | "yolo" | "plan" ("plan" is read-only).
+func WithApprovalMode(mode string) RunOption {
+	return func(c *runConfig) { c.approvalMode = mode }
 }
 
 // WithUnsetEnv strips the named environment variables from the child
@@ -232,6 +248,8 @@ func NewAgent(cfg Config) (Agent, error) {
 		return NewGenericCLI(cfg), nil
 	case "codex":
 		return NewCodex(cfg), nil
+	case "gemini":
+		return NewGemini(cfg), nil
 	default:
 		return nil, fmt.Errorf("codegen: unknown agent type %q", cfg.Type)
 	}
@@ -250,6 +268,7 @@ func resolveRunConfig(cfg Config, opts []RunOption) runConfig {
 		disallowedTools:    append([]string(nil), cfg.DisallowedTools...),
 		outputFormat:       cfg.OutputFormat,
 		sandbox:            cfg.Sandbox,
+		approvalMode:       cfg.ApprovalMode,
 	}
 	if rc.timeout == 0 {
 		rc.timeout = DefaultTimeout
@@ -269,6 +288,25 @@ func resolveRunConfig(cfg Config, opts []RunOption) runConfig {
 // capturing combined output (capped at rc.maxOutputBytes). It honours
 // rc.timeout via a derived context.
 func runCLI(ctx context.Context, name string, args []string, prompt, workDir string, rc runConfig) (Result, error) {
+	return execCapture(ctx, name, args, workDir, strings.NewReader(prompt), rc)
+}
+
+// runCLIArgvPrompt is like runCLI but passes the prompt as an argv element
+// (already baked into args by the caller) instead of piping it on stdin; the
+// child reads from the null device. Used by presets (e.g. Gemini) whose
+// headless mode is driven by a prompt flag rather than stdin. Callers are
+// responsible for prompt size, since argv is bounded by ARG_MAX (Gemini
+// prompts are small relative to that limit).
+func runCLIArgvPrompt(ctx context.Context, name string, args []string, workDir string, rc runConfig) (Result, error) {
+	return execCapture(ctx, name, args, workDir, nil, rc)
+}
+
+// execCapture runs name+args in workDir with the given stdin (which may be
+// nil), capturing combined stdout/stderr into a capped buffer. It honours
+// rc.timeout via a derived context and maps the process exit into a Result +
+// error. It is the shared body behind runCLI (stdin-piped prompt) and
+// runCLIArgvPrompt (prompt-in-argv, no stdin).
+func execCapture(ctx context.Context, name string, args []string, workDir string, stdin io.Reader, rc runConfig) (Result, error) {
 	if rc.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, rc.timeout)
@@ -277,7 +315,7 @@ func runCLI(ctx context.Context, name string, args []string, prompt, workDir str
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = workDir
-	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Stdin = stdin
 	if env := buildChildEnv(rc.unsetEnv); env != nil {
 		cmd.Env = env
 	}

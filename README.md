@@ -126,8 +126,8 @@ aider := codegen.NewGenericCLI(codegen.Config{
 ```
 
 Or pick one at runtime via `NewAgent` — pass `Type: "claude-code"`,
-`Type: "codex"`, or `Type: "generic"` (with `Command`/`Args`). See
-[`examples/with-codex`](./examples/with-codex).
+`Type: "codex"`, `Type: "gemini"`, or `Type: "generic"` (with `Command`/`Args`).
+See [`examples/with-codex`](./examples/with-codex).
 
 OpenAI Codex ships as a first-class preset (`codex exec`, prompt piped on
 stdin, default `workspace-write` sandbox):
@@ -140,10 +140,28 @@ agent := codegen.NewCodex(codegen.Config{Model: "gpt-5.3-codex"})
 `"read-only"`, `"workspace-write"` (default), or `"danger-full-access"` (maps
 to `--dangerously-bypass-approvals-and-sandbox`).
 
+Google Gemini ships as a first-class preset too. It always runs headless
+(`-p`, which Gemini requires to avoid launching an interactive TUI that would
+hang a pipeline) and trusts the working dir (`--skip-trust`):
+
+```go
+agent := codegen.NewGemini(codegen.Config{Model: "gemini-2.5-pro"})
+```
+
+`Config.ApprovalMode` (or the per-call `WithApprovalMode` option) selects the
+autonomy policy: `"default"`, `"auto_edit"`, `"yolo"` (default — auto-approve
+all tools), or `"plan"`. **`WithApprovalMode("plan")` is genuinely read-only**
+(no edits), making it ideal for plan/review stages:
+
+```go
+res, err := agent.Run(ctx, prompt, workDir, codegen.WithApprovalMode("plan"))
+```
+
 | Preset | `Type` | Notes |
 |---|---|---|
 | Claude Code | `claude-code` (default) | Anthropic's `claude` CLI; needs `claude login`. |
 | OpenAI Codex | `codex` | `codex exec`; use `NewCodex` or `Config{Type: "codex"}`. `Sandbox` selects the policy. |
+| Google Gemini | `gemini` | `gemini -p`; use `NewGemini` or `Config{Type: "gemini"}`. `ApprovalMode` selects the policy (`"plan"` is read-only). |
 | Aider | `generic` | `Command: "aider", Args: ["--yes","--no-stream","--message-file","-"]` |
 | OpenHands | `generic` | `Command: "openhands"`, plus your install's non-interactive flags |
 | Cline | `generic` | `Command: "cline"` (via the Cline CLI shim) |
@@ -159,7 +177,7 @@ zero.
 
 | Field | Default | Purpose |
 |---|---|---|
-| `Type` | `"claude-code"` | Implementation selector for `NewAgent`. `"claude-code"` or `"generic"`. |
+| `Type` | `"claude-code"` | Implementation selector for `NewAgent`. `"claude-code"`, `"codex"`, `"gemini"`, or `"generic"`. |
 | `Model` | (CLI default) | `--model` value passed to `claude`. Ignored by `GenericCLI`. |
 | `Timeout` | `30m` (`DefaultTimeout`) | Per-`Run` cap. Non-positive disables; the parent `ctx` still applies. |
 | `MaxOutputBytes` | `10 MiB` (`DefaultMaxOutputBytes`) | Cap on captured combined stdout/stderr. Negative disables. |
@@ -236,15 +254,17 @@ type Agent interface {
     Run(ctx context.Context, prompt, workDir string, opts ...RunOption) (Result, error)
 }
 
-func NewAgent(cfg Config) (Agent, error)        // factory ("claude-code" | "codex" | "generic")
+func NewAgent(cfg Config) (Agent, error)        // factory ("claude-code" | "codex" | "gemini" | "generic")
 func NewClaudeCode(cfg Config) *ClaudeCode      // direct
 func NewCodex(cfg Config) *Codex                // direct
+func NewGemini(cfg Config) *Gemini              // direct
 func NewGenericCLI(cfg Config) *GenericCLI      // direct
 
 func WithModel(model string) RunOption
 func WithTimeout(d time.Duration) RunOption
 func WithMaxOutputBytes(n int) RunOption
 func WithSandbox(mode string) RunOption
+func WithApprovalMode(mode string) RunOption
 
 func RunJSON(ctx context.Context, a Agent, prompt, workDir string, out any, opts ...RunOption) error
 ```
