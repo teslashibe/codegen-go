@@ -252,6 +252,10 @@ Two tools cover the full `Agent` surface:
   first well-formed JSON object/array from the agent's output, so you can use
   the agent as a structured reasoner (verifier, reviewer, triager).
 
+Both tools require `work_dir` to be an **absolute** path — a relative path is
+rejected with `invalid_input` rather than resolved against the host process's
+current working directory.
+
 ```go
 import (
     "github.com/teslashibe/mcptool"

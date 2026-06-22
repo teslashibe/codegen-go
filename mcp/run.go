@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	codegen "github.com/teslashibe/codegen-go"
@@ -55,15 +56,33 @@ func buildRunOptions(in RunInput) []codegen.RunOption {
 	return opts
 }
 
-func runAgent(ctx context.Context, a codegen.Agent, in RunInput) (any, error) {
+// validateRunInput performs the precondition checks shared by codegen_run
+// and codegen_run_json: a non-nil agent, a non-empty prompt, and an
+// absolute work_dir. work_dir must be absolute because the agent edits
+// files in place and shells out further — a relative path would resolve
+// against the host process's current working directory, which is both
+// surprising and unsafe for an MCP host. All failures use the
+// "invalid_input" code so callers can distinguish caller errors from
+// agent ("agent_failed") errors.
+func validateRunInput(a codegen.Agent, in RunInput) error {
 	if a == nil {
-		return nil, &mcptool.Error{Code: "invalid_input", Message: "codegen agent is nil"}
+		return &mcptool.Error{Code: "invalid_input", Message: "codegen agent is nil"}
 	}
 	if in.Prompt == "" {
-		return nil, &mcptool.Error{Code: "invalid_input", Message: "prompt must not be empty"}
+		return &mcptool.Error{Code: "invalid_input", Message: "prompt must not be empty"}
 	}
 	if in.WorkDir == "" {
-		return nil, &mcptool.Error{Code: "invalid_input", Message: "work_dir must not be empty"}
+		return &mcptool.Error{Code: "invalid_input", Message: "work_dir must not be empty"}
+	}
+	if !filepath.IsAbs(in.WorkDir) {
+		return &mcptool.Error{Code: "invalid_input", Message: fmt.Sprintf("work_dir must be an absolute path, got %q", in.WorkDir)}
+	}
+	return nil
+}
+
+func runAgent(ctx context.Context, a codegen.Agent, in RunInput) (any, error) {
+	if err := validateRunInput(a, in); err != nil {
+		return nil, err
 	}
 
 	res, err := a.Run(ctx, in.Prompt, in.WorkDir, buildRunOptions(in)...)
@@ -91,14 +110,8 @@ func runAgent(ctx context.Context, a codegen.Agent, in RunInput) (any, error) {
 }
 
 func runAgentJSON(ctx context.Context, a codegen.Agent, in RunInput) (any, error) {
-	if a == nil {
-		return nil, &mcptool.Error{Code: "invalid_input", Message: "codegen agent is nil"}
-	}
-	if in.Prompt == "" {
-		return nil, &mcptool.Error{Code: "invalid_input", Message: "prompt must not be empty"}
-	}
-	if in.WorkDir == "" {
-		return nil, &mcptool.Error{Code: "invalid_input", Message: "work_dir must not be empty"}
+	if err := validateRunInput(a, in); err != nil {
+		return nil, err
 	}
 
 	start := time.Now()
