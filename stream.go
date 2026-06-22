@@ -110,6 +110,16 @@ func (g *Gemini) streamCommand(rc runConfig, prompt string) (string, []string, i
 	return geminiBinary, buildGeminiArgs(rc, true, prompt), nil
 }
 
+// streamCommand implements streamingAgent for OpenCode. It forces `--format
+// json`, which emits NDJSON events on stdout. OpenCode's event schema differs
+// from Claude's stream-json: typed StreamEvent fields (Type, Result, …) may be
+// empty, but each line is preserved verbatim in StreamEvent.Raw so callers can
+// decode OpenCode's schema themselves. This package does not normalize the two
+// (same approach as Codex/Gemini). The prompt is piped on stdin.
+func (o *OpenCode) streamCommand(rc runConfig, prompt string) (string, []string, io.Reader) {
+	return opencodeBinary, buildOpenCodeArgs(rc, true), strings.NewReader(prompt)
+}
+
 // ErrStreamUnsupported is returned by Stream when the supplied Agent does
 // not implement streaming output (e.g. GenericCLI, third-party agents).
 var ErrStreamUnsupported = errors.New("codegen: agent does not support streaming output")
@@ -256,6 +266,8 @@ func extractAgentConfig(a Agent) Config {
 	case *Codex:
 		return v.cfg
 	case *Gemini:
+		return v.cfg
+	case *OpenCode:
 		return v.cfg
 	case *GenericCLI:
 		return v.cfg
