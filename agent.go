@@ -24,7 +24,8 @@ type Agent interface {
 // Config configures both the factory and individual Agent implementations.
 // Fields are interpreted by whichever implementation NewAgent selects.
 type Config struct {
-	// Type selects the implementation: "claude-code" (default) or "generic".
+	// Type selects the implementation: "claude-code" (default), "codex",
+	// "gemini", "opencode", or "generic".
 	Type string
 	// Model is an optional model override (passed to claude --model, ignored
 	// by the generic CLI).
@@ -63,6 +64,20 @@ type Config struct {
 	// "text". Stream() forces "stream-json" regardless of this value. Ignored
 	// by the generic CLI.
 	OutputFormat string
+	// Sandbox selects a sandbox/permission policy for presets that support one.
+	// Codex: "read-only" | "workspace-write" | "danger-full-access".
+	// Empty string lets the preset apply its own default.
+	Sandbox string
+	// ApprovalMode selects provider approval behavior.
+	// Gemini: "plan" | "yolo". Empty lets the preset apply its default.
+	ApprovalMode string
+	// SkipPermissions toggles provider permission prompts where supported.
+	// Claude always skips permissions; OpenCode maps true to
+	// --dangerously-skip-permissions. Nil lets the preset apply its default.
+	SkipPermissions *bool
+	// Variant selects provider effort/variant where supported.
+	// OpenCode: "high" | "max". Empty omits the flag.
+	Variant string
 }
 
 // Sensible defaults applied when Config / RunOption leave a field unset.
@@ -83,6 +98,10 @@ type runConfig struct {
 	allowedTools       []string
 	disallowedTools    []string
 	outputFormat       string
+	sandbox            string
+	approvalMode       string
+	skipPermissions    *bool
+	variant            string
 	// unsetEnv lists environment variable names to strip from the
 	// child process. When non-empty cmd.Env is built from os.Environ()
 	// minus these keys; an empty list (the default) leaves cmd.Env
@@ -143,6 +162,30 @@ func WithDisallowedTools(tools ...string) RunOption {
 // "json" vs the default "text" in non-streaming Run calls.
 func WithOutputFormat(format string) RunOption {
 	return func(c *runConfig) { c.outputFormat = format }
+}
+
+// WithSandbox overrides Config.Sandbox for this Run. Ignored by presets that
+// do not support a sandbox flag.
+func WithSandbox(sandbox string) RunOption {
+	return func(c *runConfig) { c.sandbox = sandbox }
+}
+
+// WithApprovalMode overrides Config.ApprovalMode for this Run. Ignored by
+// presets that do not support an approval-mode flag.
+func WithApprovalMode(mode string) RunOption {
+	return func(c *runConfig) { c.approvalMode = mode }
+}
+
+// WithSkipPermissions overrides Config.SkipPermissions for this Run. Ignored by
+// presets that do not support a skip-permissions flag.
+func WithSkipPermissions(skip bool) RunOption {
+	return func(c *runConfig) { c.skipPermissions = &skip }
+}
+
+// WithVariant overrides Config.Variant for this Run. Ignored by presets that
+// do not support a variant flag.
+func WithVariant(variant string) RunOption {
+	return func(c *runConfig) { c.variant = variant }
 }
 
 // WithUnsetEnv strips the named environment variables from the child
@@ -213,6 +256,12 @@ func NewAgent(cfg Config) (Agent, error) {
 	switch strings.TrimSpace(cfg.Type) {
 	case "", "claude-code":
 		return NewClaudeCode(cfg), nil
+	case "codex":
+		return NewCodex(cfg), nil
+	case "gemini":
+		return NewGemini(cfg), nil
+	case "opencode":
+		return NewOpenCode(cfg), nil
 	case "generic":
 		return NewGenericCLI(cfg), nil
 	default:
@@ -232,6 +281,10 @@ func resolveRunConfig(cfg Config, opts []RunOption) runConfig {
 		allowedTools:       append([]string(nil), cfg.AllowedTools...),
 		disallowedTools:    append([]string(nil), cfg.DisallowedTools...),
 		outputFormat:       cfg.OutputFormat,
+		sandbox:            cfg.Sandbox,
+		approvalMode:       cfg.ApprovalMode,
+		skipPermissions:    cfg.SkipPermissions,
+		variant:            cfg.Variant,
 	}
 	if rc.timeout == 0 {
 		rc.timeout = DefaultTimeout

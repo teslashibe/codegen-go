@@ -77,12 +77,30 @@ type streamEventHandler = func(StreamEvent)
 // they just pass a normal Agent to Stream and we type-assert.
 type streamingAgent interface {
 	Agent
-	streamCommand(rc runConfig) (binary string, args []string)
+	streamCommand(rc runConfig, prompt string) (binary string, args []string)
 }
 
 // streamCommand implements streamingAgent for ClaudeCode.
-func (c *ClaudeCode) streamCommand(rc runConfig) (string, []string) {
+func (c *ClaudeCode) streamCommand(rc runConfig, _ string) (string, []string) {
 	return claudeBinary, buildClaudeArgs(rc, true)
+}
+
+// streamCommand implements streamingAgent for Codex. Codex emits JSONL events
+// whose original objects are available in StreamEvent.Raw.
+func (c *Codex) streamCommand(rc runConfig, _ string) (string, []string) {
+	return codexBinary, buildCodexArgs(rc, true)
+}
+
+// streamCommand implements streamingAgent for Gemini. Gemini receives the
+// prompt through -p rather than stdin.
+func (g *Gemini) streamCommand(rc runConfig, prompt string) (string, []string) {
+	return geminiBinary, buildGeminiArgs(rc, true, prompt)
+}
+
+// streamCommand implements streamingAgent for OpenCode. OpenCode JSON events
+// are surfaced through StreamEvent.Raw without schema normalization.
+func (o *OpenCode) streamCommand(rc runConfig, _ string) (string, []string) {
+	return opencodeBinary, buildOpenCodeArgs(rc, true)
 }
 
 // ErrStreamUnsupported is returned by Stream when the supplied Agent does
@@ -132,7 +150,7 @@ func Stream(
 	}
 
 	rc := resolveRunConfig(extractAgentConfig(agent), opts)
-	binary, args := sa.streamCommand(rc)
+	binary, args := sa.streamCommand(rc, prompt)
 
 	if rc.timeout > 0 {
 		var cancel context.CancelFunc
@@ -229,6 +247,12 @@ func extractAgentConfig(a Agent) Config {
 	case *ClaudeCode:
 		return v.cfg
 	case *GenericCLI:
+		return v.cfg
+	case *Codex:
+		return v.cfg
+	case *Gemini:
+		return v.cfg
+	case *OpenCode:
 		return v.cfg
 	default:
 		return Config{}

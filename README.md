@@ -109,15 +109,13 @@ tolerated. See [`examples/json-reasoner`](./examples/json-reasoner).
 
 ## Swap in another CLI
 
-Anything that reads a prompt from stdin and edits files in its working
-directory works. Construct a `GenericCLI` with the binary name and any flags
-the tool needs to run non-interactively:
+Use one of the first-class presets, or fall back to `GenericCLI` for anything
+that reads a prompt from stdin and edits files in its working directory:
 
 ```go
-codex := codegen.NewGenericCLI(codegen.Config{
-    Command: "codex",
-    Args:    []string{"--auto-approve"},
-})
+codex := codegen.NewCodex(codegen.Config{Model: "gpt-5.3-codex"})
+gemini := codegen.NewGemini(codegen.Config{Model: "gemini-3-pro"})
+opencode := codegen.NewOpenCode(codegen.Config{Model: "anthropic/claude-sonnet-4"})
 
 aider := codegen.NewGenericCLI(codegen.Config{
     Command: "aider",
@@ -125,14 +123,16 @@ aider := codegen.NewGenericCLI(codegen.Config{
 })
 ```
 
-Or pick one at runtime via `NewAgent` — pass `Type: "claude-code"` or
-`Type: "generic"` (with `Command`/`Args`). See
+Or pick one at runtime via `NewAgent` — pass `Type: "claude-code"`, `"codex"`,
+`"gemini"`, `"opencode"`, or `"generic"` (with `Command`/`Args`). See
 [`examples/with-codex`](./examples/with-codex).
 
 | Preset | `Type` | Notes |
 |---|---|---|
 | Claude Code | `claude-code` (default) | Anthropic's `claude` CLI; needs `claude login`. |
-| OpenAI Codex | `generic` | `Command: "codex", Args: ["--auto-approve"]` |
+| OpenAI Codex | `codex` | `codex exec`; `Sandbox`/`WithSandbox` supports `read-only`, `workspace-write`, `danger-full-access`. |
+| Google Gemini | `gemini` | `gemini -p`; `ApprovalMode`/`WithApprovalMode("plan")` supports read-only planning. |
+| OpenCode | `opencode` | `opencode run`; `SkipPermissions`/`WithSkipPermissions` controls write autonomy. |
 | Aider | `generic` | `Command: "aider", Args: ["--yes","--no-stream","--message-file","-"]` |
 | OpenHands | `generic` | `Command: "openhands"`, plus your install's non-interactive flags |
 | Cline | `generic` | `Command: "cline"` (via the Cline CLI shim) |
@@ -148,12 +148,16 @@ zero.
 
 | Field | Default | Purpose |
 |---|---|---|
-| `Type` | `"claude-code"` | Implementation selector for `NewAgent`. `"claude-code"` or `"generic"`. |
-| `Model` | (CLI default) | `--model` value passed to `claude`. Ignored by `GenericCLI`. |
+| `Type` | `"claude-code"` | Implementation selector for `NewAgent`. `"claude-code"`, `"codex"`, `"gemini"`, `"opencode"`, or `"generic"`. |
+| `Model` | (CLI default) | Provider model flag where supported. Ignored by `GenericCLI`. |
 | `Timeout` | `30m` (`DefaultTimeout`) | Per-`Run` cap. Non-positive disables; the parent `ctx` still applies. |
 | `MaxOutputBytes` | `10 MiB` (`DefaultMaxOutputBytes`) | Cap on captured combined stdout/stderr. Negative disables. |
 | `Command` | — | Binary for `GenericCLI`. |
 | `Args` | — | Extra argv prepended for `GenericCLI`. |
+| `Sandbox` | preset default | Codex sandbox: `"read-only"`, `"workspace-write"`, or `"danger-full-access"`. |
+| `ApprovalMode` | preset default | Gemini approval mode, e.g. `"plan"` or `"yolo"`. |
+| `SkipPermissions` | preset default | OpenCode permission-prompt skip toggle. |
+| `Variant` | — | OpenCode variant, e.g. `"high"` or `"max"`. |
 
 ```go
 res, err := agent.Run(ctx, prompt, workDir,
@@ -225,13 +229,20 @@ type Agent interface {
     Run(ctx context.Context, prompt, workDir string, opts ...RunOption) (Result, error)
 }
 
-func NewAgent(cfg Config) (Agent, error)        // factory ("claude-code" | "generic")
+func NewAgent(cfg Config) (Agent, error)        // factory ("claude-code" | "codex" | "gemini" | "opencode" | "generic")
 func NewClaudeCode(cfg Config) *ClaudeCode      // direct
+func NewCodex(cfg Config) *Codex                // direct
+func NewGemini(cfg Config) *Gemini              // direct
+func NewOpenCode(cfg Config) *OpenCode          // direct
 func NewGenericCLI(cfg Config) *GenericCLI      // direct
 
 func WithModel(model string) RunOption
 func WithTimeout(d time.Duration) RunOption
 func WithMaxOutputBytes(n int) RunOption
+func WithSandbox(sandbox string) RunOption
+func WithApprovalMode(mode string) RunOption
+func WithSkipPermissions(skip bool) RunOption
+func WithVariant(variant string) RunOption
 
 func RunJSON(ctx context.Context, a Agent, prompt, workDir string, out any, opts ...RunOption) error
 ```
