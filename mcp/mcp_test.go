@@ -197,6 +197,26 @@ func TestCodegenRun_RejectsEmptyWorkDir(t *testing.T) {
 	}
 }
 
+func TestCodegenRun_RejectsRelativeWorkDir(t *testing.T) {
+	for _, name := range []string{"codegen_run", "codegen_run_json"} {
+		t.Run(name, func(t *testing.T) {
+			tool := findTool(t, name)
+			agent := stubAgent{name: "stub", run: func(context.Context, string, string, ...codegen.RunOption) (codegen.Result, error) {
+				t.Fatal("agent.Run must not be called when work_dir is relative")
+				return codegen.Result{}, nil
+			}}
+			_, err := tool.Invoke(context.Background(), codegen.Agent(agent), json.RawMessage(`{"prompt":"x","work_dir":"relative/dir"}`))
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var toolErr *mcptool.Error
+			if !errors.As(err, &toolErr) || toolErr.Code != "invalid_input" {
+				t.Fatalf("expected invalid_input, got %v", err)
+			}
+		})
+	}
+}
+
 func TestCodegenRunJSON_DecodesObject(t *testing.T) {
 	tool := findTool(t, "codegen_run_json")
 	agent := stubAgent{
