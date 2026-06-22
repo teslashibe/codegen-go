@@ -24,7 +24,8 @@ type Agent interface {
 // Config configures both the factory and individual Agent implementations.
 // Fields are interpreted by whichever implementation NewAgent selects.
 type Config struct {
-	// Type selects the implementation: "claude-code" (default) or "generic".
+	// Type selects the implementation: "claude-code" (default), "codex", or
+	// "generic".
 	Type string
 	// Model is an optional model override (passed to claude --model, ignored
 	// by the generic CLI).
@@ -63,6 +64,12 @@ type Config struct {
 	// "text". Stream() forces "stream-json" regardless of this value. Ignored
 	// by the generic CLI.
 	OutputFormat string
+
+	// Sandbox selects a sandbox/permission policy for presets that support one.
+	// Codex: "read-only" | "workspace-write" | "danger-full-access".
+	// Empty string lets the preset apply its own default. Ignored by presets
+	// that don't model a sandbox (claude-code, generic).
+	Sandbox string
 }
 
 // Sensible defaults applied when Config / RunOption leave a field unset.
@@ -83,6 +90,7 @@ type runConfig struct {
 	allowedTools       []string
 	disallowedTools    []string
 	outputFormat       string
+	sandbox            string
 	// unsetEnv lists environment variable names to strip from the
 	// child process. When non-empty cmd.Env is built from os.Environ()
 	// minus these keys; an empty list (the default) leaves cmd.Env
@@ -143,6 +151,13 @@ func WithDisallowedTools(tools ...string) RunOption {
 // "json" vs the default "text" in non-streaming Run calls.
 func WithOutputFormat(format string) RunOption {
 	return func(c *runConfig) { c.outputFormat = format }
+}
+
+// WithSandbox overrides Config.Sandbox for this Run. Presets that model a
+// sandbox/permission policy (Codex) apply it; others ignore it. Pass an empty
+// string to fall back to the preset's own default.
+func WithSandbox(mode string) RunOption {
+	return func(c *runConfig) { c.sandbox = mode }
 }
 
 // WithUnsetEnv strips the named environment variables from the child
@@ -215,6 +230,8 @@ func NewAgent(cfg Config) (Agent, error) {
 		return NewClaudeCode(cfg), nil
 	case "generic":
 		return NewGenericCLI(cfg), nil
+	case "codex":
+		return NewCodex(cfg), nil
 	default:
 		return nil, fmt.Errorf("codegen: unknown agent type %q", cfg.Type)
 	}
@@ -232,6 +249,7 @@ func resolveRunConfig(cfg Config, opts []RunOption) runConfig {
 		allowedTools:       append([]string(nil), cfg.AllowedTools...),
 		disallowedTools:    append([]string(nil), cfg.DisallowedTools...),
 		outputFormat:       cfg.OutputFormat,
+		sandbox:            cfg.Sandbox,
 	}
 	if rc.timeout == 0 {
 		rc.timeout = DefaultTimeout
