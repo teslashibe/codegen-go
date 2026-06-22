@@ -29,6 +29,7 @@ func TestNewAgent_Factory(t *testing.T) {
 	}{
 		{"default empty", Config{}, false, "claude-code"},
 		{"explicit claude", Config{Type: "claude-code"}, false, "claude-code"},
+		{"codex", Config{Type: "codex"}, false, "codex"},
 		{"generic", Config{Type: "generic", Command: "echo"}, false, "generic"},
 		{"unknown", Config{Type: "bogus"}, true, ""},
 	}

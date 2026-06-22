@@ -85,6 +85,15 @@ func (c *ClaudeCode) streamCommand(rc runConfig) (string, []string) {
 	return claudeBinary, buildClaudeArgs(rc, true)
 }
 
+// streamCommand implements streamingAgent for Codex. Codex `--json` emits
+// JSONL whose objects use a different schema from Claude's stream-json, so
+// the typed StreamEvent fields (Type, Result, ...) may be empty for Codex
+// events; the original NDJSON line is always surfaced via [StreamEvent.Raw]
+// so callers can decode Codex's schema themselves.
+func (c *Codex) streamCommand(rc runConfig) (string, []string) {
+	return codexBinary, buildCodexArgs(rc, true)
+}
+
 // ErrStreamUnsupported is returned by Stream when the supplied Agent does
 // not implement streaming output (e.g. GenericCLI, third-party agents).
 var ErrStreamUnsupported = errors.New("codegen: agent does not support streaming output")
@@ -227,6 +236,8 @@ func scanStream(r io.Reader, onEvent func(StreamEvent)) error {
 func extractAgentConfig(a Agent) Config {
 	switch v := a.(type) {
 	case *ClaudeCode:
+		return v.cfg
+	case *Codex:
 		return v.cfg
 	case *GenericCLI:
 		return v.cfg

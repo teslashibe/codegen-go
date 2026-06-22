@@ -125,14 +125,22 @@ aider := codegen.NewGenericCLI(codegen.Config{
 })
 ```
 
-Or pick one at runtime via `NewAgent` — pass `Type: "claude-code"` or
-`Type: "generic"` (with `Command`/`Args`). See
+OpenAI Codex ships as a first-class preset — `NewCodex` wraps `codex exec`,
+pipes the prompt on stdin, and maps `Config.Sandbox` onto Codex's sandbox
+policy (default `workspace-write`):
+
+```go
+agent := codegen.NewCodex(codegen.Config{Model: "gpt-5.3-codex"})
+```
+
+Or pick one at runtime via `NewAgent` — pass `Type: "claude-code"`,
+`Type: "codex"`, or `Type: "generic"` (with `Command`/`Args`). See
 [`examples/with-codex`](./examples/with-codex).
 
 | Preset | `Type` | Notes |
 |---|---|---|
 | Claude Code | `claude-code` (default) | Anthropic's `claude` CLI; needs `claude login`. |
-| OpenAI Codex | `generic` | `Command: "codex", Args: ["--auto-approve"]` |
+| OpenAI Codex | `codex` | `codex exec` via `NewCodex`; sandbox via `Config.Sandbox` / `WithSandbox`. |
 | Aider | `generic` | `Command: "aider", Args: ["--yes","--no-stream","--message-file","-"]` |
 | OpenHands | `generic` | `Command: "openhands"`, plus your install's non-interactive flags |
 | Cline | `generic` | `Command: "cline"` (via the Cline CLI shim) |
@@ -154,6 +162,7 @@ zero.
 | `MaxOutputBytes` | `10 MiB` (`DefaultMaxOutputBytes`) | Cap on captured combined stdout/stderr. Negative disables. |
 | `Command` | — | Binary for `GenericCLI`. |
 | `Args` | — | Extra argv prepended for `GenericCLI`. |
+| `Sandbox` | (preset default) | Sandbox/permission policy for presets that support one. Codex: `read-only` \| `workspace-write` \| `danger-full-access`. Ignored by `claude-code`/`generic`. |
 
 ```go
 res, err := agent.Run(ctx, prompt, workDir,
@@ -225,13 +234,15 @@ type Agent interface {
     Run(ctx context.Context, prompt, workDir string, opts ...RunOption) (Result, error)
 }
 
-func NewAgent(cfg Config) (Agent, error)        // factory ("claude-code" | "generic")
+func NewAgent(cfg Config) (Agent, error)        // factory ("claude-code" | "codex" | "generic")
 func NewClaudeCode(cfg Config) *ClaudeCode      // direct
+func NewCodex(cfg Config) *Codex                // direct
 func NewGenericCLI(cfg Config) *GenericCLI      // direct
 
 func WithModel(model string) RunOption
 func WithTimeout(d time.Duration) RunOption
 func WithMaxOutputBytes(n int) RunOption
+func WithSandbox(mode string) RunOption
 
 func RunJSON(ctx context.Context, a Agent, prompt, workDir string, out any, opts ...RunOption) error
 ```
