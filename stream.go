@@ -75,14 +75,19 @@ type streamEventHandler = func(StreamEvent)
 //
 // It is intentionally unexported: callers don't need to construct one,
 // they just pass a normal Agent to Stream and we type-assert.
+// streamCommand returns the binary, argv, and stdin reader to exec for
+// streaming. Most presets pipe the prompt on stdin (returning a non-nil
+// reader); presets whose headless mode is driven by a prompt flag (Gemini)
+// bake the prompt into args and return a nil stdin reader. The prompt is
+// passed in so argv-prompt presets can place it themselves.
 type streamingAgent interface {
 	Agent
-	streamCommand(rc runConfig) (binary string, args []string)
+	streamCommand(rc runConfig, prompt string) (binary string, args []string, stdin io.Reader)
 }
 
-// streamCommand implements streamingAgent for ClaudeCode.
-func (c *ClaudeCode) streamCommand(rc runConfig) (string, []string) {
-	return claudeBinary, buildClaudeArgs(rc, true)
+// streamCommand implements streamingAgent for ClaudeCode (prompt on stdin).
+func (c *ClaudeCode) streamCommand(rc runConfig, prompt string) (string, []string, io.Reader) {
+	return claudeBinary, buildClaudeArgs(rc, true), strings.NewReader(prompt)
 }
 
 // streamCommand implements streamingAgent for Codex. It forces `codex exec
@@ -90,8 +95,19 @@ func (c *ClaudeCode) streamCommand(rc runConfig) (string, []string) {
 // from Claude's stream-json: typed StreamEvent fields (Type, Result, …) may be
 // empty, but each line is preserved verbatim in StreamEvent.Raw so callers can
 // decode Codex's schema themselves. This package does not normalize the two.
-func (c *Codex) streamCommand(rc runConfig) (string, []string) {
-	return codexBinary, buildCodexArgs(rc, true)
+// The prompt is piped on stdin (the trailing `-` makes Codex read it there).
+func (c *Codex) streamCommand(rc runConfig, prompt string) (string, []string, io.Reader) {
+	return codexBinary, buildCodexArgs(rc, true), strings.NewReader(prompt)
+}
+
+// streamCommand implements streamingAgent for Gemini. It forces `-o
+// stream-json` and bakes the prompt into argv via -p (no stdin), matching the
+// non-streaming Run path. Gemini's stream-json schema differs from Claude's:
+// typed StreamEvent fields may be empty, but each line is preserved verbatim in
+// StreamEvent.Raw so callers can decode Gemini's schema themselves. This
+// package does not normalize the two (same approach as Codex).
+func (g *Gemini) streamCommand(rc runConfig, prompt string) (string, []string, io.Reader) {
+	return geminiBinary, buildGeminiArgs(rc, true, prompt), nil
 }
 
 // ErrStreamUnsupported is returned by Stream when the supplied Agent does
@@ -141,7 +157,7 @@ func Stream(
 	}
 
 	rc := resolveRunConfig(extractAgentConfig(agent), opts)
-	binary, args := sa.streamCommand(rc)
+	binary, args, stdin := sa.streamCommand(rc, prompt)
 
 	if rc.timeout > 0 {
 		var cancel context.CancelFunc
@@ -151,7 +167,7 @@ func Stream(
 
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = workDir
-	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Stdin = stdin
 	if env := buildChildEnv(rc.unsetEnv); env != nil {
 		cmd.Env = env
 	}
@@ -238,6 +254,8 @@ func extractAgentConfig(a Agent) Config {
 	case *ClaudeCode:
 		return v.cfg
 	case *Codex:
+		return v.cfg
+	case *Gemini:
 		return v.cfg
 	case *GenericCLI:
 		return v.cfg
