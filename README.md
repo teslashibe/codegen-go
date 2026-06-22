@@ -125,14 +125,25 @@ aider := codegen.NewGenericCLI(codegen.Config{
 })
 ```
 
-Or pick one at runtime via `NewAgent` — pass `Type: "claude-code"` or
-`Type: "generic"` (with `Command`/`Args`). See
+Or pick one at runtime via `NewAgent` — pass `Type: "claude-code"`,
+`Type: "codex"`, or `Type: "generic"` (with `Command`/`Args`). See
 [`examples/with-codex`](./examples/with-codex).
+
+OpenAI Codex ships as a first-class preset (`codex exec`, prompt piped on
+stdin, default `workspace-write` sandbox):
+
+```go
+agent := codegen.NewCodex(codegen.Config{Model: "gpt-5.3-codex"})
+```
+
+`Config.Sandbox` (or the per-call `WithSandbox` option) selects the policy:
+`"read-only"`, `"workspace-write"` (default), or `"danger-full-access"` (maps
+to `--dangerously-bypass-approvals-and-sandbox`).
 
 | Preset | `Type` | Notes |
 |---|---|---|
 | Claude Code | `claude-code` (default) | Anthropic's `claude` CLI; needs `claude login`. |
-| OpenAI Codex | `generic` | `Command: "codex", Args: ["--auto-approve"]` |
+| OpenAI Codex | `codex` | `codex exec`; use `NewCodex` or `Config{Type: "codex"}`. `Sandbox` selects the policy. |
 | Aider | `generic` | `Command: "aider", Args: ["--yes","--no-stream","--message-file","-"]` |
 | OpenHands | `generic` | `Command: "openhands"`, plus your install's non-interactive flags |
 | Cline | `generic` | `Command: "cline"` (via the Cline CLI shim) |
@@ -225,13 +236,15 @@ type Agent interface {
     Run(ctx context.Context, prompt, workDir string, opts ...RunOption) (Result, error)
 }
 
-func NewAgent(cfg Config) (Agent, error)        // factory ("claude-code" | "generic")
+func NewAgent(cfg Config) (Agent, error)        // factory ("claude-code" | "codex" | "generic")
 func NewClaudeCode(cfg Config) *ClaudeCode      // direct
+func NewCodex(cfg Config) *Codex                // direct
 func NewGenericCLI(cfg Config) *GenericCLI      // direct
 
 func WithModel(model string) RunOption
 func WithTimeout(d time.Duration) RunOption
 func WithMaxOutputBytes(n int) RunOption
+func WithSandbox(mode string) RunOption
 
 func RunJSON(ctx context.Context, a Agent, prompt, workDir string, out any, opts ...RunOption) error
 ```
