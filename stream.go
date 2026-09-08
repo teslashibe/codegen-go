@@ -161,7 +161,7 @@ func Stream(
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
-	if env := buildChildEnv(rc.unsetEnv); env != nil {
+	if env := buildRunEnv(rc); env != nil {
 		cmd.Env = env
 	}
 

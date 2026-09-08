@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"context"
+	"strconv"
 	"strings"
 )
 
@@ -60,5 +61,8 @@ func buildCodexArgs(rc runConfig, streaming bool) []string {
 		args = append(args, "-m", model)
 	}
 
+	if effort := strings.TrimSpace(rc.reasoningEffort); effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(effort))
+	}
 	return append(args, "-")
 }
