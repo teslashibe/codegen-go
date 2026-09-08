@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 )
@@ -30,6 +31,8 @@ type Config struct {
 	// Model is an optional model override (passed to claude --model, ignored
 	// by the generic CLI).
 	Model string
+	// ReasoningEffort is the explicit Codex reasoning effort for this invocation.
+	ReasoningEffort string
 	// Timeout caps a single Run invocation. Zero falls back to DefaultTimeout.
 	Timeout time.Duration
 	// MaxOutputBytes caps captured combined output. Zero falls back to
@@ -91,6 +94,8 @@ type RunOption func(*runConfig)
 
 type runConfig struct {
 	model              string
+	reasoningEffort    string
+	environment        map[string]string
 	timeout            time.Duration
 	maxOutputBytes     int
 	appendSystemPrompt string
@@ -113,6 +118,48 @@ type runConfig struct {
 // Ignored by agents that do not understand a model flag.
 func WithModel(model string) RunOption {
 	return func(c *runConfig) { c.model = model }
+}
+
+// WithReasoningEffort sets Codex's model_reasoning_effort explicitly.
+func WithReasoningEffort(effort string) RunOption {
+	return func(c *runConfig) { c.reasoningEffort = effort }
+}
+
+// WithEnvironment sets invocation-local environment values without mutating the parent.
+// Values are copied when the option is created. Explicit values take precedence over UnsetEnv.
+func WithEnvironment(values map[string]string) RunOption {
+	copied := make(map[string]string, len(values))
+	for k, v := range values {
+		copied[k] = v
+	}
+	return func(c *runConfig) {
+		if c.environment == nil {
+			c.environment = make(map[string]string)
+		}
+		for k, v := range copied {
+			c.environment[k] = v
+		}
+	}
+}
+
+func buildRunEnv(rc runConfig) []string {
+	if len(rc.environment) == 0 {
+		return buildChildEnv(rc.unsetEnv)
+	}
+	unset := append([]string(nil), rc.unsetEnv...)
+	for key := range rc.environment {
+		unset = append(unset, key)
+	}
+	env := buildChildEnv(unset)
+	keys := make([]string, 0, len(rc.environment))
+	for key := range rc.environment {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		env = append(env, key+"="+rc.environment[key])
+	}
+	return env
 }
 
 // WithTimeout overrides the per-Run timeout. Pass a non-positive value to
@@ -274,6 +321,7 @@ func NewAgent(cfg Config) (Agent, error) {
 func resolveRunConfig(cfg Config, opts []RunOption) runConfig {
 	rc := runConfig{
 		model:              cfg.Model,
+		reasoningEffort:    cfg.ReasoningEffort,
 		timeout:            cfg.Timeout,
 		maxOutputBytes:     cfg.MaxOutputBytes,
 		appendSystemPrompt: cfg.AppendSystemPrompt,
@@ -313,7 +361,7 @@ func runCLI(ctx context.Context, name string, args []string, prompt, workDir str
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
-	if env := buildChildEnv(rc.unsetEnv); env != nil {
+	if env := buildRunEnv(rc); env != nil {
 		cmd.Env = env
 	}
 
